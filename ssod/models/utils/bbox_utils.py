@@ -192,12 +192,12 @@ class Transform2D:
         if isinstance(mask, Sequence):
             assert len(mask) == len(M)
             return [
-                Transform2D.transform_masks(b, m, o)
+                Transform2D.transform_masks(b, m, o[:2])
                 for b, m, o in zip(mask, M, out_shape)
             ]
         else:
             if mask.masks.shape[0] == 0:
-                return BitmapMasks(np.zeros((0, *out_shape)), *out_shape)
+                return BitmapMasks(np.zeros((0, *out_shape[:2])), *out_shape[:2])
             mask_tensor = (
                 torch.from_numpy(mask.masks[:, None, ...]).to(M.device).to(M.dtype)
             )
@@ -205,7 +205,7 @@ class Transform2D:
                 warp_affine(
                     mask_tensor,
                     M[None, ...].expand(mask.masks.shape[0], -1, -1),
-                    out_shape,
+                    out_shape[:2],
                 )
                 .squeeze(1)
                 .cpu()
@@ -237,7 +237,7 @@ class Transform2D:
 
 def filter_invalid(bbox, label=None, score=None, mask=None, thr=0.0, min_size=0):
     if score is not None:
-        valid = score > thr
+        valid = score >= thr
         bbox = bbox[valid]
         if label is not None:
             label = label[valid]
@@ -253,3 +253,26 @@ def filter_invalid(bbox, label=None, score=None, mask=None, thr=0.0, min_size=0)
         if mask is not None:
             mask = BitmapMasks(mask.masks[valid.cpu().numpy()], mask.height, mask.width)
     return bbox, label, mask
+
+
+def result2bbox(result):
+    num_class = len(result)
+
+    bbox = np.concatenate(result)
+    if bbox.shape[0] == 0:
+        label = np.zeros(0, dtype=np.uint8)
+    else:
+        label = np.concatenate(
+            [[i] * len(result[i]) for i in range(num_class) if len(result[i]) > 0]
+        ).reshape((-1,))
+    return bbox, label
+
+
+def result2mask(result):
+    num_class = len(result)
+    mask = [np.stack(result[i]) for i in range(num_class) if len(result[i]) > 0]
+    if len(mask) > 0:
+        mask = np.concatenate(mask)
+    else:
+        mask = np.zeros((0, 1, 1))
+    return BitmapMasks(mask, mask.shape[1], mask.shape[2]), None
